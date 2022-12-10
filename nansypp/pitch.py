@@ -75,14 +75,19 @@ class PitchEncoder(nn.Module):
         """
         super().__init__()
         self.f0_bins = f0_bins
+        # prekernels=7
         self.preconv = nn.Conv1d(
             1, channels, prekernels, padding=prekernels // 2)
+        # channels=128, kernels=3, blocks=2
         self.resblock = nn.Sequential(*[
             ResBlock(channels, channels, kernels)
             for _ in range(blocks)])
+        # unknown `gru`
         self.gru = nn.GRU(
             freq * channels // (2 * blocks), gru,
             batch_first=True, bidirectional=True)
+        # unknown `hiddens`
+        # f0_bins=64
         self.proj = nn.Sequential(
             nn.Linear(gru * 2, hiddens * 2),
             nn.ReLU(),
