@@ -52,6 +52,7 @@ class LinguisticEncoder(nn.Module):
         """
         super().__init__()
         # in_channels=1024, hiddens=128, preconv=2
+        # unknown `leak`, `dropout`
         self.preconv = nn.Sequential(
             nn.Conv1d(in_channels, hiddens, 1),
             nn.LeakyReLU(leak),
