@@ -83,6 +83,3 @@ class LinguisticEncoder(nn.Module):
         x = self.convglu(x)
         # [B, hiddens, N]
         return F.normalize(self.proj(x), dim=1)
-
-
-
