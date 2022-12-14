@@ -107,7 +107,7 @@ class FrameLevelSynthesizer(nn.Module):
             nn.Conv1d(channels, channels, 1),
             nn.LeakyReLU(leak),
             nn.Dropout(dropout))
-        # dilations=[1, 3, 9, 27, 1, 3, 9, 27], blocks=2
+        # kernels=3, dilations=[1, 3, 9, 27, 1, 3, 9, 27], blocks=2
         self.convglu = CondSequential(
             [
                 ConvGLU(channels, kernels, dilation, dropout, cond=embed)
