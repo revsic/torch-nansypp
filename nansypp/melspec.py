@@ -5,16 +5,6 @@ import torch.nn as nn
 import torchaudio
 
 
-class ConstantQTransform(nn.Module):
-    """Constant Q-Transform for pitch estimation.
-    """
-    def __init__(self):
-        super().__init__()
-    
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        return inputs
-
-
 class MelSpectrogram(nn.Module):
     """log-Mel scale spectrogram.
     """

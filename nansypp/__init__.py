@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from .config import Config
 
-from .transform import ConstantQTransform, MelSpectrogram
+from .melspec import MelSpectrogram
 from .framelevel import FrameLevelSynthesizer
 from .linguistic import LinguisticEncoder
 from .pitch import PitchEncoder
