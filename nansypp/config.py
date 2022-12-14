@@ -2,7 +2,7 @@ class Config:
     """NANSY++ configurations.
     """
     def __init__(self):
-        self.sr = None
+        self.sr = 22050
 
         # unknown all STFT hyperparameters
         self.mel = 80
