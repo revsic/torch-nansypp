@@ -1,0 +1,3 @@
+[submodule "speechset"]
+	path = speechset
+	url = https://github.com/revsic/speechset
