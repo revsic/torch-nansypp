@@ -10,7 +10,7 @@ from .wavenet import WaveNet
 
 
 class SignalGenerator(nn.Module):
-    """Additive sinusoidal, subtractive noise signal generator.
+    """Additive sinusoidal, subtractive filtered noise signal generator.
     """
     def __init__(self, scale: int, sr: int):
         """Initializer.
