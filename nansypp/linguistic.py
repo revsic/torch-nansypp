@@ -19,7 +19,7 @@ class ConvGLU(nn.Module):
         self.conv = nn.Sequential(
             nn.Dropout(dropout),
             nn.Conv1d(in_channels, in_channels * 2, kernels, padding=kernels // 2),
-            nn.GLU())
+            nn.GLU(dim=1))
     
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """Transform the inputs.
