@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -45,6 +46,14 @@ class Nansypp(nn.Module):
             config.pitch_gru,
             config.pitch_hiddens,
             config.pitch_f0_bins)
+        
+        self.register_buffer(
+            'pitch_bins', 
+            # linear space in log-scale
+            torch.linspace(
+                np.log(config.pitch_start),
+                np.log(config.pitch_end),
+                config.pitch_f0_bins).exp())
 
         self.melspec = MelSpectrogram(
             config.mel_hop,
@@ -102,10 +111,10 @@ class Nansypp(nn.Module):
         """
         # []
         cqt = self.cqt(inputs)
-        # []
+        # [B, N, f0_bins], [B, N], [B, N]
         pitch_bins, p_amp, ap_amp = self.pitch.forward(cqt)
-        # TODO: weighted sum based on predefined bins
-        pitch = _
+        # [B, N]
+        pitch = (pitch_bins * self.pitch_bins).sum(dim=-1)
         # [], [B, N]
         return cqt, pitch, p_amp, ap_amp
     

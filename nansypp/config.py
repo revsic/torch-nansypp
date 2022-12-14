@@ -42,6 +42,8 @@ class Config:
         # unknown
         self.pitch_hiddens = None
         self.pitch_f0_bins = 64
+        self.pitch_start = 50  # hz
+        self.pitch_end = 1000
 
         # Synthesizer
         self.synth_scale = _
