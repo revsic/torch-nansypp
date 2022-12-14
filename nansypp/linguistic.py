@@ -63,7 +63,7 @@ class LinguisticEncoder(nn.Module):
                     nn.LeakyReLU(leak),
                     nn.Dropout(dropout))
                 for _ in range(preconv - 1)])
-        # [3] * 8 + [1] * 2
+        # kernels=[3] * 8 + [1] * 2
         self.convglu = nn.Sequential(*[
             ConvGLU(hiddens, kernel, dropout)
             for kernel in kernels])
