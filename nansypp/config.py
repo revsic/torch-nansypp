@@ -36,7 +36,7 @@ class Config:
         # ConstantQTransform
         self.cqt_hop = 256
         self.cqt_fmin = 32.7
-        self.cqt_fmax = 8000
+        # self.cqt_fmax = 8000
         self.cqt_bins = 191
         self.cqt_bins_per_octave = 24
 

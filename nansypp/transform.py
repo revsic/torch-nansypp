@@ -13,14 +13,13 @@ class ConstantQTransform(nn.Module):
     def __init__(self,
                  strides: int,
                  fmin: float,
-                 fmax: float,
                  bins: int,
                  bins_per_octave: int,
                  sr: int = 16000):
         """Initializer.
         Args:
             strides: the number of the samples between adjacent frame.
-            fmin, fmax: frequency min, max.
+            fmin: frequency min.
             bins: the number of the output bins.
             bins_per_octave: the number of the frequency bins per octave.
             sr: sampling rate.
@@ -28,13 +27,15 @@ class ConstantQTransform(nn.Module):
         super().__init__()
         # unknown `strides`
         # , since linguistic information is 50fps, strides could be 441
-        # fmin=32.7(C0), fmax=8000
+        # fmin=32.7(C0)
         # bins=191, bins_per_octave=24
+        # , fmax = 2 ** (bins / bins_per_octave) * fmin
+        #        = 2 ** (191 / 24) * 32.7
+        #        = 8132.89
         self.cqt = CQT2010v2(
             sr,
             strides,
             fmin,
-            fmax,
             n_bins=bins,
             bins_per_octave=bins_per_octave,
             trainable=False,

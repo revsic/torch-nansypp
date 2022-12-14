@@ -39,7 +39,6 @@ class Nansypp(nn.Module):
         self.cqt = ConstantQTransform(
             config.cqt_hop,
             config.cqt_fmin,
-            config.cqt_fmax,
             config.cqt_bins,
             config.cqt_bins_per_octave,
             config.sr)
