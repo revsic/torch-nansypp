@@ -13,8 +13,10 @@ class Config:
         self.mel_fmax = 8000
 
         # unknown
-        self.leak = None
-        self.dropout = None
+        # , default negative-slope of nn.LeakyReLU
+        self.leak = 0.01
+        # , default dropout rate of nn.Transformer
+        self.dropout = 0.1
 
         # Wav2Vec2Wrapper
         self.w2v2_name = 'facebook/wav2vec2-large-xlsr-53'
@@ -31,22 +33,28 @@ class Config:
         self.ling_preconv = 2
         self.ling_kernels = [3] * 8 + [1] * 2
 
+        # ConstantQTransform
+        self.cqt_hop = 256
+        self.cqt_fmin = 32.7
+        self.cqt_fmax = 8000
+        self.cqt_bins = 191
+        self.cqt_bins_per_octave = 24
+
         # PitchEncoder
-        self.pitch_freq = _
+        self.pitch_freq = 160
         self.pitch_prekernels = 7
         self.pitch_kernels = 3
         self.pitch_channels = 128
         self.pitch_blocks = 2
         # unknown
-        self.pitch_gru = None
+        self.pitch_gru = 256
         # unknown
-        self.pitch_hiddens = None
+        self.pitch_hiddens = 256
         self.pitch_f0_bins = 64
         self.pitch_start = 50  # hz
         self.pitch_end = 1000
 
         # Synthesizer
-        self.synth_scale = _
         self.synth_channels = 64
         self.synth_kernels = 3
         self.synth_dilation_rate = 2
@@ -67,6 +75,6 @@ class Config:
         self.timb_timber = 128
         self.timb_tokens = 50
         # unknown
-        self.timb_heads = None
+        self.timb_heads = 8
         # unknown
-        self.timb_slerp = None
+        self.timb_slerp = 0.5
