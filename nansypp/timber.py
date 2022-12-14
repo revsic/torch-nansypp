@@ -173,8 +173,8 @@ class MultiheadAttention(nn.Module):
         self.proj_key = nn.Conv1d(keys, hiddens, 1)
         self.proj_value = nn.Conv1d(values, hiddens, 1)
         self.proj_query = nn.Conv1d(queries, hiddens, 1)
-        self.proj_out = nn.Linear(hiddens, out_channels)
-    
+        self.proj_out = nn.Conv1d(hiddens, out_channels, 1)
+
     def forward(self,
                 keys: torch.Tensor,
                 values: torch.Tensor,
@@ -319,11 +319,11 @@ class TimberEncoder(nn.Module):
         # [B, H, T]
         mfa = self.conv1x1(torch.cat(xs, dim=1))
         # [B, O]
-        global_ = F.normalize(self.pool(x), p=2, dim=-1)
+        global_ = F.normalize(self.pool(mfa), p=2, dim=-1)
         # B
         bsize, _ = global_.shape
         # [B, latent, tokens]
-        query = self.timber_query.repeat(bsize)
+        query = self.timber_query.repeat(bsize, 1, 1)
         # [B, latent, tokens]
         query = self.pre_mha.forward(mfa, mfa, query) + query
         # [B, timber, tokens]
