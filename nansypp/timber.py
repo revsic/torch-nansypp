@@ -295,7 +295,7 @@ class TimberEncoder(nn.Module):
         self.timber_key = nn.Parameter(torch.randn(1, timber, tokens))
         self.sampler = MultiheadAttention(
             timber, timber, contents, timber, latent, heads)
-        self.proj = nn.Conv1d(timber, out_channels)
+        self.proj = nn.Conv1d(timber, out_channels, 1)
         # unknown `slerp`
         assert 0 <= slerp <= 1, f'value slerp(={slerp:.2f}) should be in range [0, 1]'
         self.slerp = slerp
