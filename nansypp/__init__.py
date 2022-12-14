@@ -35,7 +35,13 @@ class Nansypp(nn.Module):
             config.leak,
             config.dropout)
 
-        self.cqt = ConstantQTransform()
+        self.cqt = ConstantQTransform(
+            config.cqt_hop,
+            config.cqt_fmin,
+            config.cqt_fmax,
+            config.cqt_bins,
+            config.cqt_bins_per_octave,
+            config.sr)
 
         self.pitch = PitchEncoder(
             config.pitch_freq,
@@ -91,7 +97,7 @@ class Nansypp(nn.Module):
             config.dropout)
 
         self.synthesizer = Synthesizer(
-            config.synth_scale,
+            config.cqt_hop,
             config.sr,
             config.synth_channels,
             config.ling_hiddens,
@@ -100,19 +106,22 @@ class Nansypp(nn.Module):
             config.synth_layers,
             config.synth_cycles)
 
-    def analyze_pitch(self, inputs: torch.Tensor) \
+    def analyze_pitch(self, inputs: torch.Tensor, index: int = 0) \
             -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Estimate the pitch and periodical, aperiodical amplitudes.
         Args:
             inputs: [torch.float32; [B, T]], input speech signal.
+            index: CQT start index.
         Returns:
             [torch.float32; []], CQT features.
             [torch.float2; [B, N]], frame-level pitch and amplitude sequence.
         """
-        # []
+        # [B, cqt_bins, N(=T / cqt_hop)]
         cqt = self.cqt(inputs)
+        # alias
+        freq = self.config.pitch_freq
         # [B, N, f0_bins], [B, N], [B, N]
-        pitch_bins, p_amp, ap_amp = self.pitch.forward(cqt)
+        pitch_bins, p_amp, ap_amp = self.pitch.forward(cqt[:, index:index + freq])
         # [B, N]
         pitch = (pitch_bins * self.pitch_bins).sum(dim=-1)
         # [], [B, N]
