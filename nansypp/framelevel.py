@@ -2,7 +2,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 
 class ConvGLU(nn.Module):
@@ -43,10 +43,10 @@ class ConvGLU(nn.Module):
         """
         # [B, channels, T]
         x = inputs + self.conv(inputs)
-        if cond:
+        if cond is not None:
             assert self.cond is not None, 'condition module does not exists'
             # [B, channels, T]
-            x = torch.instance_norm(x, use_input_stats=True)
+            x = F.instance_norm(x, use_input_stats=True)
             # [B, channels, T]
             weight, bias = self.cond(cond).chunk(2, dim=1)
             # [B, channels, T]
@@ -63,7 +63,7 @@ class CondSequential(nn.Module):
             modules: list of torch modules.
         """
         super().__init__()
-        self.modules = nn.ModuleList(modules)
+        self.lists = nn.ModuleList(modules)
     
     def forward(self, inputs: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """Pass the inputs to modules.
@@ -74,7 +74,7 @@ class CondSequential(nn.Module):
             output tensor.
         """
         x = inputs
-        for module in self.modules:
+        for module in self.lists:
             x = module.forward(x, *args, **kwargs)
         return x
 
