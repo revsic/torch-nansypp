@@ -43,7 +43,7 @@ class WaveNetBlock(nn.Module):
             skip: [torch.float32; [B, C, T]], skip connection purposed.
         """
         # [B, C x 2, T]
-        x = self.conv(inputs) + self.proj_mel(aux)
+        x = self.conv(inputs) + self.proj_aux(aux)
         # [B, C, T]
         gate, context = x.chunk(2, dim=1)
         # [B, C, T]

@@ -25,6 +25,7 @@ class Nansypp(nn.Module):
             config: NANSY++ configurations.
         """
         super().__init__()
+        self.config = config
         # assume the output channels of wav2vec2.forward is `config.w2v2_channels`
         self.wav2vec2 = Wav2Vec2Wrapper(config.w2v2_name, config.sr, config.w2v2_lin)
         self.linguistic = LinguisticEncoder(
@@ -137,7 +138,7 @@ class Nansypp(nn.Module):
         # [B, S, w2v2_channels]
         w2v2 = self.wav2vec2.forward(inputs)
         # [B, ling_hiddens, S]
-        return self.linguistic.forward(w2v2)
+        return self.linguistic.forward(w2v2.transpose(1, 2))
 
     def analyze_timber(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Analyze the timber informations from inputs.
@@ -231,7 +232,7 @@ class Nansypp(nn.Module):
             features['ap_amp'],
             features['ling'],
             features['timber_global'],
-            features['timber_local'],
+            features['timber_bank'],
             noise=noise)
         # update
         features['excitation'] = excitation
