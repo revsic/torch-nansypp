@@ -76,8 +76,8 @@ class PitchEncoder(nn.Module):
         super().__init__()
         self.f0_bins = f0_bins
         # prekernels=7
-        self.preconv = nn.Conv1d(
-            1, channels, prekernels, padding=prekernels // 2)
+        self.preconv = nn.Conv2d(
+            1, channels, (prekernels, 1), padding=(prekernels // 2, 0))
         # channels=128, kernels=3, blocks=2
         self.resblock = nn.Sequential(*[
             ResBlock(channels, channels, kernels)
@@ -108,7 +108,7 @@ class PitchEncoder(nn.Module):
         # [B, C F // 4, N]
         x = self.resblock(x)
         # [B, N, C x F // 4]
-        x = x.transpose(0, 3, 1, 2).reshape(bsize, timesteps, -1)
+        x = x.permute(0, 3, 1, 2).reshape(bsize, timesteps, -1)
         # [B, N, G x 2]
         x, _ = self.gru(x)
         # [B, N, f0_bins], [B, N, 1], [B, N, 1]
