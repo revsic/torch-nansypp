@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -151,9 +152,65 @@ class AttentiveStatisticsPooling(nn.Module):
 class MultiheadAttention(nn.Module):
     """Multi-head scaled dot-product attention.
     """
-    def __init__(self, in_channels: int, hiddens: int, heads: int):
+    def __init__(self,
+                 keys: int,
+                 values: int,
+                 queries: int,
+                 out_channels: int,
+                 hiddens: int,
+                 heads: int):
+        """Initializer.
+        Args:
+            keys, valeus, queries: size of the input channels.
+            out_channels: size of the output channels.
+            hiddens: size of the hidden channels.
+            heads: the number of the attention heads.
         """
+        super().__init__()
+        assert hiddens % heads == 0, \
+            f'size of hiddens channels(={hiddens}) should be factorized by heads(={heads})'
+        self.channels, self.heads = hiddens // heads, heads
+        self.proj_key = nn.Conv1d(keys, hiddens, 1)
+        self.proj_value = nn.Conv1d(values, hiddens, 1)
+        self.proj_query = nn.Conv1d(queries, hiddens, 1)
+        self.proj_out = nn.Linear(hiddens, out_channels)
+    
+    def forward(self,
+                keys: torch.Tensor,
+                values: torch.Tensor,
+                queries: torch.Tensor,
+                mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Transform the inputs.
+        Args:
+            keys: [torch.float32; [B, keys, S]], attention key.
+            values: [torch.float32; [B, values, S]], attention value.
+            queries: [torch.float32; [B, queries, T]], attention query.
+            mask: [torch.float32; [B, S, T]], attention mask, 0 for paddings.
+        Returns:
+            [torch.float32; [B, out_channels, T]], transformed outputs.
         """
+        # B, T
+        bsize, _, querylen = queries.shape
+        # S
+        keylen = keys.shape[-1]
+        assert keylen == values.shape[-1], 'lengths of key and value are not matched'
+        # [B, H, hiddens // H, S]
+        keys = self.proj_key(keys).view(bsize, self.heads, -1, keylen)
+        values = self.proj_value(values).view(bsize, self.heads, -1, keylen)
+        # [B, H, hiddens // H, T]
+        queries = self.proj_query(queries).view(bsize, self.heads, -1, querylen)
+        # [B, H, S, T]
+        score = torch.matmul(keys.transpose(2, 3), queries) * (self.channels ** -0.5)
+        if mask is not None:
+            score.masked_fill_(~mask[:, None, :, 0:1].to(torch.bool), -np.inf)
+        # [B, H, S, T]
+        weights = torch.softmax(score, dim=2)
+        # [B, out_channels, T]
+        out = self.proj_out(
+            torch.matmul(values, weights).view(bsize, -1, querylen))
+        if mask is not None:
+            out = out * mask[:, 0:1]
+        return out
 
 
 class TimberEncoder(nn.Module):
@@ -175,7 +232,13 @@ class TimberEncoder(nn.Module):
                  kernels: int,
                  dilations: List[int],
                  bottleneck: int,
-                 hiddens: int):
+                 hiddens: int,
+                 latent: int,
+                 timber: int,
+                 tokens: int,
+                 heads: int,
+                 contents: int,
+                 slerp: float):
         """Initializer.
         Args:
             in_channels: size of the input channels.
@@ -188,6 +251,12 @@ class TimberEncoder(nn.Module):
             bottleneck: size of the bottleneck layers,
                 both SERes2Block and AttentiveStatisticsPooling.
             hiddens: size of the hidden channels for attentive statistics pooling.
+            latent: size of the timber latent query.
+            timber: size of the timber tokens.
+            tokens: the number of the timber tokens.
+            heads: the number of the attention heads, for timber token block.
+            contents: size of the content queries.
+            slerp: weight value for spherical interpolation.
         """
         super().__init__()
         # channels=512, prekernels=5
@@ -201,9 +270,19 @@ class TimberEncoder(nn.Module):
             SERes2Block(channels, scale, kernels, dilation, bottleneck)
             for dilation in dilations])
         # hiddens=1536
+        # TODO: hiddens=3072 on NANSY++
         self.conv1x1 = nn.Sequential(
             nn.Conv1d(len(dilations) * channels, hiddens, 1),
             nn.ReLU())
+        # multi-head attention for time-varying timber 
+        # NANSY++, latent=512, tokens=50
+        self.timber_query = nn.Parameter(torch.randn(1, latent, tokens))
+        # NANSY++, timber=128
+        # unknown `heads`
+        self.pre_mha = MultiheadAttention(
+            hiddens, hiddens, latent, latent, latent, heads)
+        self.post_mha = MultiheadAttention(
+            hiddens, hiddens, latent, timber, latent, heads)
         # attentive pooling and additional projector
         # out_channels=192
         self.pool = nn.Sequential(
@@ -211,15 +290,23 @@ class TimberEncoder(nn.Module):
             nn.BatchNorm1d(hiddens * 2),
             nn.Linear(hiddens * 2, out_channels),
             nn.BatchNorm1d(out_channels))
+        
+        # time-varying timber encoder
+        self.timber_key = nn.Parameter(torch.randn(1, timber, tokens))
+        self.sampler = MultiheadAttention(
+            timber, timber, contents, timber, latent, heads)
+        self.proj = nn.Conv1d(timber, out_channels)
+        # unknown `slerp`
+        assert 0 <= slerp <= 1, f'value slerp(={slerp:.2f}) should be in range [0, 1]'
+        self.slerp = slerp
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Evaluate the x-vectors from the input sequence.
         Args:
-            inputs: [torch.float32; [B, I, T]], input sequences,
-                where I = `in_channels`.
+            inputs: [torch.float32; [B, in_channels, T]], input sequences,
         Returns:
-            [torch.float32; [B, O]], x-vectors,
-                where O = `out_channels`.
+            [torch.float32; [B, out_channels]], global x-vectors,
+            [torch.float32; [B, timber, tokens]], timber token bank.
         """
         # [B, C, T]
         x = self.preblock(inputs)
@@ -230,6 +317,42 @@ class TimberEncoder(nn.Module):
             x = block(x)
             xs.append(x)
         # [B, H, T]
-        x = self.conv1x1(torch.cat(xs, dim=1))
+        mfa = self.conv1x1(torch.cat(xs, dim=1))
         # [B, O]
-        return F.normalize(self.pool(x), p=2, dim=-1)
+        global_ = F.normalize(self.pool(x), p=2, dim=-1)
+        # B
+        bsize, _ = global_.shape
+        # [B, latent, tokens]
+        query = self.timber_query.repeat(bsize)
+        # [B, latent, tokens]
+        query = self.pre_mha.forward(mfa, mfa, query) + query
+        # [B, timber, tokens]
+        local = self.post_mha.forward(mfa, mfa, query)
+        # [B, out_channels], [B, timber, tokens]
+        return global_, local
+
+    def sample_timber(self,
+                      contents: torch.Tensor,
+                      global_: torch.Tensor,
+                      tokens: torch.Tensor,
+                      eps: float = 1e-5) -> torch.Tensor:
+        """Sample the timber tokens w.r.t. the contents.
+        Args:
+            contents: [torch.float32; [B, contents, T]], content queries.
+            global_: [torch.float32; [B, out_channels]], global x-vectors, L2-normalized.
+            tokens: [torch.float32; [B, timber, tokens]], timber token bank.
+            eps: small value for preventing train instability of arccos in slerp.
+        Returns:
+            [torch.float32; [B, out_channels, T]], time-varying timber embeddings.
+        """\
+        # [B, timber, T]
+        sampled = self.sampler.forward(self.timber_key, tokens, contents)
+        # [B, out_channels, T]
+        sampled = F.normalize(self.proj(sampled), p=2, dim=1)
+        # [B, 1, T]
+        theta = torch.matmul(global_[:, None], sampled).clamp(-1 +  eps, 1 - eps).acos()
+        # [B, 1, T], slerp
+        # clamp the theta is not necessary since cos(theta) is already clampped
+        return (
+            torch.sin(self.slerp * theta) * sampled
+            + torch.sin((1 - self.slerp) * theta) * global_[..., None]) / theta.sin()
