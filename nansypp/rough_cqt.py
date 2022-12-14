@@ -26,9 +26,283 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+import warnings
 
+import librosa
+import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from scipy import signal
+
+
+def nextpow2(A):
+    """A helper function to calculate the next nearest number to the power of 2.
+    Parameters
+    ----------
+    A : float
+        A float number that is going to be rounded up to the nearest power of 2
+    Returns
+    -------
+    int
+        The nearest power of 2 to the input number ``A``
+    Examples
+    --------
+    >>> nextpow2(6)
+    3
+    """
+
+    return int(np.ceil(np.log2(A)))
+
+
+def create_lowpass_filter(band_center=0.5, kernelLength=256, transitionBandwidth=0.03):
+    """
+    Calculate the highest frequency we need to preserve and the lowest frequency we allow
+    to pass through.
+    Note that frequency is on a scale from 0 to 1 where 0 is 0 and 1 is Nyquist frequency of
+    the signal BEFORE downsampling.
+    """
+
+    # transitionBandwidth = 0.03
+    passbandMax = band_center / (1 + transitionBandwidth)
+    stopbandMin = band_center * (1 + transitionBandwidth)
+
+    # Unlike the filter tool we used online yesterday, this tool does
+    # not allow us to specify how closely the filter matches our
+    # specifications. Instead, we specify the length of the kernel.
+    # The longer the kernel is, the more precisely it will match.
+    # kernelLength = 256
+
+    # We specify a list of key frequencies for which we will require
+    # that the filter match a specific output gain.
+    # From [0.0 to passbandMax] is the frequency range we want to keep
+    # untouched and [stopbandMin, 1.0] is the range we want to remove
+    keyFrequencies = [0.0, passbandMax, stopbandMin, 1.0]
+
+    # We specify a list of output gains to correspond to the key
+    # frequencies listed above.
+    # The first two gains are 1.0 because they correspond to the first
+    # two key frequencies. the second two are 0.0 because they
+    # correspond to the stopband frequencies
+    gainAtKeyFrequencies = [1.0, 1.0, 0.0, 0.0]
+
+    # This command produces the filter kernel coefficients
+    filterKernel = signal.firwin2(kernelLength, keyFrequencies, gainAtKeyFrequencies)
+
+    return filterKernel.astype(np.float32)
+
+
+def create_cqt_kernels(
+    Q,
+    fs,
+    fmin,
+    n_bins=84,
+    bins_per_octave=12,
+    norm=1,
+    window="hann",
+    fmax=None,
+    topbin_check=True,
+    gamma=0,
+    pad_fft=True
+):
+    """
+    Automatically create CQT kernels in time domain
+    """
+
+    fftLen = 2 ** nextpow2(np.ceil(Q * fs / fmin))
+    # minWin = 2**nextpow2(np.ceil(Q * fs / fmax))
+
+    if (fmax != None) and (n_bins == None):
+        n_bins = np.ceil(
+            bins_per_octave * np.log2(fmax / fmin)
+        )  # Calculate the number of bins
+        freqs = fmin * 2.0 ** (np.r_[0:n_bins] / np.float(bins_per_octave))
+
+    elif (fmax == None) and (n_bins != None):
+        freqs = fmin * 2.0 ** (np.r_[0:n_bins] / np.float(bins_per_octave))
+
+    else:
+        warnings.warn("If fmax is given, n_bins will be ignored", SyntaxWarning)
+        n_bins = np.ceil(
+            bins_per_octave * np.log2(fmax / fmin)
+        )  # Calculate the number of bins
+        freqs = fmin * 2.0 ** (np.r_[0:n_bins] / np.float(bins_per_octave))
+
+    if np.max(freqs) > fs / 2 and topbin_check == True:
+        raise ValueError(
+            "The top bin {}Hz has exceeded the Nyquist frequency, \
+                          please reduce the n_bins".format(
+                np.max(freqs)
+            )
+        )
+
+    alpha = 2.0 ** (1.0 / bins_per_octave) - 1.0
+    lengths = np.ceil(Q * fs / (freqs + gamma / alpha))
+    
+    # get max window length depending on gamma value
+    max_len = int(max(lengths))
+    fftLen = int(2 ** (np.ceil(np.log2(max_len))))
+
+    tempKernel = np.zeros((int(n_bins), int(fftLen)), dtype=np.complex64)
+    specKernel = np.zeros((int(n_bins), int(fftLen)), dtype=np.complex64)
+
+    for k in range(0, int(n_bins)):
+        freq = freqs[k]
+        l = lengths[k]
+
+        # Centering the kernels
+        if l % 2 == 1:  # pad more zeros on RHS
+            start = int(np.ceil(fftLen / 2.0 - l / 2.0)) - 1
+        else:
+            start = int(np.ceil(fftLen / 2.0 - l / 2.0))
+
+        window_dispatch = librosa.filters.get_window(window, int(l), fftbins=True)
+        sig = window_dispatch * np.exp(np.r_[-l // 2 : l // 2] * 1j * 2 * np.pi * freq / fs) / l
+
+        if norm:  # Normalizing the filter # Trying to normalize like librosa
+            tempKernel[k, start : start + int(l)] = sig / np.linalg.norm(sig, norm)
+        else:
+            tempKernel[k, start : start + int(l)] = sig
+        # specKernel[k, :] = fft(tempKernel[k])
+
+    # return specKernel[:,:fftLen//2+1], fftLen, torch.tensor(lenghts).float()
+    return tempKernel, fftLen, torch.tensor(lengths).float(), freqs
+
+
+# The following two downsampling count functions are obtained from librosa CQT
+# They are used to determine the number of pre resamplings if the starting and ending frequency
+# are both in low frequency regions.
+def early_downsample_count(nyquist, filter_cutoff, hop_length, n_octaves):
+    """Compute the number of early downsampling operations"""
+
+    downsample_count1 = max(
+        0, int(np.ceil(np.log2(0.85 * nyquist / filter_cutoff)) - 1) - 1
+    )
+    # print("downsample_count1 = ", downsample_count1)
+    num_twos = nextpow2(hop_length)
+    downsample_count2 = max(0, num_twos - n_octaves + 1)
+    # print("downsample_count2 = ",downsample_count2)
+
+    return min(downsample_count1, downsample_count2)
+
+
+def early_downsample(sr, hop_length, n_octaves, nyquist, filter_cutoff):
+    """Return new sampling rate and hop length after early dowansampling"""
+    downsample_count = early_downsample_count(
+        nyquist, filter_cutoff, hop_length, n_octaves
+    )
+    # print("downsample_count = ", downsample_count)
+    downsample_factor = 2 ** (downsample_count)
+
+    hop_length //= downsample_factor  # Getting new hop_length
+    new_sr = sr / float(downsample_factor)  # Getting new sampling rate
+    sr = new_sr
+
+    return sr, hop_length, downsample_factor
+
+
+def get_early_downsample_params(sr, hop_length, fmax_t, Q, n_octaves, verbose):
+    """Used in CQT2010 and CQT2010v2"""
+
+    window_bandwidth = 1.5  # for hann window
+    filter_cutoff = fmax_t * (1 + 0.5 * window_bandwidth / Q)
+    sr, hop_length, downsample_factor = early_downsample(
+        sr, hop_length, n_octaves, sr // 2, filter_cutoff
+    )
+    if downsample_factor != 1:
+        if verbose == True:
+            print("Can do early downsample, factor = ", downsample_factor)
+        earlydownsample = True
+        # print("new sr = ", sr)
+        # print("new hop_length = ", hop_length)
+        early_downsample_filter = create_lowpass_filter(
+            band_center=1 / downsample_factor,
+            kernelLength=256,
+            transitionBandwidth=0.03,
+        )
+        early_downsample_filter = torch.tensor(early_downsample_filter)[None, None, :]
+
+    else:
+        if verbose == True:
+            print(
+                "No early downsampling is required, downsample_factor = ",
+                downsample_factor,
+            )
+        early_downsample_filter = None
+        earlydownsample = False
+
+    return sr, hop_length, downsample_factor, early_downsample_filter, earlydownsample
+
+
+def get_cqt_complex(x, cqt_kernels_real, cqt_kernels_imag, hop_length, padding):
+    """Multiplying the STFT result with the cqt_kernel, check out the 1992 CQT paper [1]
+    for how to multiple the STFT result with the CQT kernel
+    [2] Brown, Judith C.C. and Miller Puckette. “An efficient algorithm for the calculation of
+    a constant Q transform.” (1992)."""
+
+    # STFT, converting the audio input from time domain to frequency domain
+    try:
+        x = padding(
+            x
+        )  # When center == True, we need padding at the beginning and ending
+    except:
+        warnings.warn(
+            f"\ninput size = {x.shape}\tkernel size = {cqt_kernels_real.shape[-1]}\n"
+            "padding with reflection mode might not be the best choice, try using constant padding",
+            UserWarning,
+        )
+        x = torch.nn.functional.pad(
+            x, (cqt_kernels_real.shape[-1] // 2, cqt_kernels_real.shape[-1] // 2)
+        )
+    CQT_real = F.conv1d(x, cqt_kernels_real, stride=hop_length)
+    CQT_imag = -F.conv1d(x, cqt_kernels_imag, stride=hop_length)
+
+    return torch.stack((CQT_real, CQT_imag), -1)
+
+
+def downsampling_by_n(x, filterKernel, n):
+    """A helper function that downsamples the audio by a arbitary factor n.
+    It is used in CQT2010 and CQT2010v2.
+    Parameters
+    ----------
+    x : torch.Tensor
+        The input waveform in ``torch.Tensor`` type with shape ``(batch, 1, len_audio)``
+    filterKernel : str
+        Filter kernel in ``torch.Tensor`` type with shape ``(1, 1, len_kernel)``
+    n : int
+        The downsampling factor
+    Returns
+    -------
+    torch.Tensor
+        The downsampled waveform
+    Examples
+    --------
+    >>> x_down = downsampling_by_n(x, filterKernel)
+    """
+
+    x = F.conv1d(x, filterKernel, stride=n, padding=(filterKernel.shape[-1] - 1) // 2)
+    return x
+
+
+def downsampling_by_2(x, filterKernel):
+    """A helper function that downsamples the audio by half. It is used in CQT2010 and CQT2010v2
+    Parameters
+    ----------
+    x : torch.Tensor
+        The input waveform in ``torch.Tensor`` type with shape ``(batch, 1, len_audio)``
+    filterKernel : str
+        Filter kernel in ``torch.Tensor`` type with shape ``(1, 1, len_kernel)``
+    Returns
+    -------
+    torch.Tensor
+        The downsampled waveform
+    Examples
+    --------
+    >>> x_down = downsampling_by_2(x, filterKernel)
+    """
+
+    x = F.conv1d(x, filterKernel, stride=2, padding=(filterKernel.shape[-1] - 1) // 2)
+    return x
 
 
 class CQT2010v2(nn.Module):
@@ -125,7 +399,6 @@ class CQT2010v2(nn.Module):
         earlydownsample=True,
         trainable=False,
         output_format="Magnitude",
-        verbose=True,
     ):
 
         super().__init__()
@@ -147,14 +420,6 @@ class CQT2010v2(nn.Module):
         Q = float(filter_scale) / (2 ** (1 / bins_per_octave) - 1)
 
         # Creating lowpass filter and make it a torch tensor
-        if verbose == True:
-            print("Creating low pass filter ...", end="\r")
-        start = time()
-        # self.lowpass_filter = torch.tensor(
-        #                                     create_lowpass_filter(
-        #                                     band_center = 0.50,
-        #                                     kernelLength=256,
-        #                                     transitionBandwidth=0.001))
         lowpass_filter = torch.tensor(
             create_lowpass_filter(
                 band_center=0.50, kernelLength=256, transitionBandwidth=0.001
@@ -163,19 +428,11 @@ class CQT2010v2(nn.Module):
 
         # Broadcast the tensor to the shape that fits conv1d
         self.register_buffer("lowpass_filter", lowpass_filter[None, None, :])
-        if verbose == True:
-            print(
-                "Low pass filter created, time used = {:.4f} seconds".format(
-                    time() - start
-                )
-            )
 
         # Caluate num of filter requires for the kernel
         # n_octaves determines how many resampling requires for the CQT
         n_filters = min(bins_per_octave, n_bins)
         self.n_octaves = int(np.ceil(float(n_bins) / bins_per_octave))
-        if verbose == True:
-            print("num_octave = ", self.n_octaves)
 
         # Calculate the lowest frequency bin for the top octave kernel
         self.fmin_t = fmin * 2 ** (self.n_octaves - 1)
@@ -203,9 +460,6 @@ class CQT2010v2(nn.Module):
         if (
             self.earlydownsample == True
         ):  # Do early downsampling if this argument is True
-            if verbose == True:
-                print("Creating early downsampling filter ...", end="\r")
-            start = time()
             (
                 sr,
                 self.hop_length,
@@ -213,24 +467,13 @@ class CQT2010v2(nn.Module):
                 early_downsample_filter,
                 self.earlydownsample,
             ) = get_early_downsample_params(
-                sr, hop_length, fmax_t, Q, self.n_octaves, verbose
+                sr, hop_length, fmax_t, Q, self.n_octaves, False
             )
             self.register_buffer("early_downsample_filter", early_downsample_filter)
-
-            if verbose == True:
-                print(
-                    "Early downsampling filter created, \
-                        time used = {:.4f} seconds".format(
-                        time() - start
-                    )
-                )
         else:
             self.downsample_factor = 1.0
 
         # Preparing CQT kernels
-        if verbose == True:
-            print("Creating CQT kernels ...", end="\r")
-        start = time()
         basis, self.n_fft, lenghts, _ = create_cqt_kernels(
             Q,
             sr,
@@ -265,12 +508,6 @@ class CQT2010v2(nn.Module):
             self.register_buffer("cqt_kernels_real", cqt_kernels_real)
             self.register_buffer("cqt_kernels_imag", cqt_kernels_imag)
 
-        if verbose == True:
-            print(
-                "CQT kernels created, time used = {:.4f} seconds".format(time() - start)
-            )
-        # print("Getting cqt kernel done, n_fft = ",self.n_fft)
-
         # If center==True, the STFT window will be put in the middle, and paddings at the beginning
         # and ending are required.
         if self.pad_mode == "constant":
@@ -292,7 +529,6 @@ class CQT2010v2(nn.Module):
         """
         output_format = output_format or self.output_format
 
-        x = broadcast_dim(x)
         if self.earlydownsample == True:
             x = downsampling_by_n(
                 x, self.early_downsample_filter, self.downsample_factor
@@ -347,4 +583,3 @@ class CQT2010v2(nn.Module):
             phase_real = torch.cos(torch.atan2(CQT[:, :, :, 1], CQT[:, :, :, 0]))
             phase_imag = torch.sin(torch.atan2(CQT[:, :, :, 1], CQT[:, :, :, 0]))
             return torch.stack((phase_real, phase_imag), -1)
-    
