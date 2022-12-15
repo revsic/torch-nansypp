@@ -217,7 +217,7 @@ class TrainingWrapper:
 
         # pitch consistency
         pitch_loss = F.huber_loss(
-            biased_pitch.log2() + 0.5 * dist,
+            biased_pitch.log2() + 0.5 * dist[:, None],
             pitch.log2(),
             delta=self.config.train.delta)
 

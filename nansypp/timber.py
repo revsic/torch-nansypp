@@ -344,9 +344,11 @@ class TimberEncoder(nn.Module):
             eps: small value for preventing train instability of arccos in slerp.
         Returns:
             [torch.float32; [B, out_channels, T]], time-varying timber embeddings.
-        """\
+        """
+        # [B, timber, tokens]
+        key = self.timber_key.repeat(contents.shape[0], 1, 1)
         # [B, timber, T]
-        sampled = self.sampler.forward(self.timber_key, tokens, contents)
+        sampled = self.sampler.forward(key, tokens, contents)
         # [B, out_channels, T]
         sampled = F.normalize(self.proj(sampled), p=2, dim=1)
         # [B, 1, T]
