@@ -157,7 +157,7 @@ class DumpReader(speechset.datasets.DataReader):
                     meta[sid]['lists'].append((i, text, path))
 
         with open(os.path.join(out_dir, 'meta.json'), 'w') as f:
-            json.dump(f, meta)
+            json.dump(meta, f)
 
 
 if __name__ == '__main__':
