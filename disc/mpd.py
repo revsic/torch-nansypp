@@ -107,7 +107,7 @@ class MultiPeriodDiscriminator(nn.Module):
             multiple discriminating results and feature maps.
         """
         results, fmaps = [], []
-        for disc in self.discriminator:
+        for disc in self.disc:
             result, fmap = disc(inputs)
             results.append(result)
             fmaps.append(fmap)
