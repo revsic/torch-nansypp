@@ -51,7 +51,7 @@ class TrainConfig:
         self.hops = [512, 128, 32]
 
         # loader settings
-        self.batch = 32
+        self.batch = 16
         self.shuffle = True
         self.num_workers = 4
         self.pin_memory = True
