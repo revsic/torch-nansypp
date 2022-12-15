@@ -145,7 +145,7 @@ class Trainer:
             losses = {
                 key: [] for key in {**losses_d, **losses_g}}
             with torch.no_grad():
-                for bunch in self.testloader:
+                for bunch in tqdm.tqdm(self.testloader, leave=False):
                     _, seg = self.wrapper.random_segment(bunch)
                     seg = torch.tensor(seg, device=self.wrapper.device)
                     _, losses_g, _ = self.wrapper.loss_generator(seg)
@@ -174,8 +174,9 @@ class Trainer:
                     torch.tensor(speech[None], device=self.wrapper.device))
                 self.model.train()
 
+                synth = synth.squeeze(dim=0).cpu().numpy()
                 self.test_log.add_image(
-                    'mel-synth', self.mel_img(self.melspec(synth.squeeze(dim=0)).T), step)
+                    'mel-synth', self.mel_img(self.melspec(synth).T), step)
 
             self.model.save(f'{self.ckpt_path}_{epoch}.ckpt', self.optim_g)
             self.disc.save(f'{self.ckpt_path}_{epoch}.ckpt-disc', self.optim_d)
