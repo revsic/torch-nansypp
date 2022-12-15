@@ -37,15 +37,6 @@ class TrainingWrapper:
         self.seglen = self.config.train.seglen
         self.content_weight = self.config.train.content_start
 
-    def wrap(self, bunch: List[np.ndarray]) -> List[torch.Tensor]:
-        """Wrap the array to torch tensor.
-        Args:
-            bunch: input tensors.
-        Returns:
-            wrapped.
-        """
-        return [torch.tensor(array, device=self.device) for array in bunch]
-
     def random_segment(self, bunch: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
         """Segment the spectrogram and audio into fixed sized array.
         Args:
