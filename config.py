@@ -18,6 +18,9 @@ class TrainConfig:
         # default beta values
         self.beta1 = 0.9
         self.beta2 = 0.999
+        # huber norm
+        # unknown
+        self.delta = 1.0
 
         # augment
         self.num_code = 32
@@ -30,6 +33,16 @@ class TrainConfig:
         self.num_peak = 8
         self.g_min = -12
         self.g_max = 12
+        # pitch consistency
+        self.cqt_shift_min = -12
+        self.cqt_shift_max = 12
+        # linguistic informations
+        self.kappa = 0.1
+
+        # objective
+        # 16khz sr, default win=[1920, 320, 80], hop=[640, 80, 40] in NSF
+        self.wins = [2048, 512, 128]
+        self.hops = [512, 128, 32]
 
         # loader settings
         self.split = -10
