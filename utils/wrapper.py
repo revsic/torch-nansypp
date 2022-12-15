@@ -285,7 +285,8 @@ class TrainingWrapper:
             'gen/pitch': pitch_loss.item(),
             'gen/cont': cont_loss.item(),
             'gen/cont-pos': pos.mean().item() * kappa,
-            'gen/cont-neg': neg.mean().item() * kappa}
+            'gen/cont-neg': neg.mean().item() * kappa,
+            'gen/warmup': self.content_weight}
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy(),

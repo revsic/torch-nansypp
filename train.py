@@ -103,7 +103,7 @@ class Trainer:
                     loss_g.backward()
                     self.optim_g.step()
 
-                    loss_d, losses_d, aux_d = self.wrapper.loss_discriminator(seg)
+                    loss_d, losses_d, _ = self.wrapper.loss_discriminator(seg)
                     # update
                     self.optim_d.zero_grad()
                     loss_d.backward()
@@ -112,6 +112,8 @@ class Trainer:
                     step += 1
                     pbar.update()
                     pbar.set_postfix({'loss': loss_d.item(), 'step': step})
+
+                    self.wrapper.update_warmup()
 
                     for key, val in {**losses_g, **losses_d}.items():
                         self.train_log.add_scalar(key, val, step)
