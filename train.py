@@ -179,6 +179,8 @@ class Trainer:
                 synth = synth.squeeze(dim=0).cpu().numpy()
                 self.test_log.add_image(
                     'mel-synth', self.mel_img(self.melspec(synth).T), step)
+                self.test_log.add_audio(
+                    f'synth', synth[None], step, sample_rate=self.config.data.sr)
 
             self.model.save(f'{self.ckpt_path}_{epoch}.ckpt', self.optim_g)
             self.disc.save(f'{self.ckpt_path}_{epoch}.ckpt-disc', self.optim_d)
