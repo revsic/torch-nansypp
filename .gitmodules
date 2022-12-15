@@ -1,3 +1,6 @@
 [submodule "speechset"]
 	path = speechset
 	url = https://github.com/revsic/speechset
+[submodule "speechaug"]
+	path = speechaug
+	url = https://github.com/revsic/speechaug
