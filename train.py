@@ -96,7 +96,7 @@ class Trainer:
             with tqdm.tqdm(total=len(self.loader), leave=False) as pbar:
                 for it, bunch in enumerate(self.loader):
                     _, seg = self.wrapper.random_segment(bunch)
-                    seg = torch.tensor(seg, self.wrapper.device)
+                    seg = torch.tensor(seg, device=self.wrapper.device)
                     loss_g, losses_g, aux_g = self.wrapper.loss_generator(seg)
                     # update
                     self.optim_g.zero_grad()
@@ -140,14 +140,14 @@ class Trainer:
                             'mel-synth', self.mel_img(aux_g['mel_f'][Trainer.LOG_IDX]), step)
                         self.train_log.add_image(
                             # [3, M, T]
-                            'log-cqt', self.mel_img(aux_d['log-cqt'][Trainer.LOG_IDX]), step)
+                            'log-cqt', self.mel_img(aux_g['log-cqt'][Trainer.LOG_IDX]), step)
 
             losses = {
                 key: [] for key in {**losses_d, **losses_g}}
             with torch.no_grad():
                 for bunch in self.testloader:
                     _, seg = self.wrapper.random_segment(bunch)
-                    seg = torch.tensor(seg, self.wrapper.device)
+                    seg = torch.tensor(seg, device=self.wrapper.device)
                     _, losses_g, _ = self.wrapper.loss_generator(seg)
                     _, losses_d, _ = self.wrapper.loss_discriminator(seg)
                     for key, val in {**losses_g, **losses_d}.items():
@@ -244,8 +244,10 @@ if __name__ == '__main__':
     #         speechset.datasets.LibriSpeech('./datasets/LibriSpeech/train-other-500', sr),
     #         speechset.datasets.VCTK('./datasets/VCTK-Corpus', sr)]))
 
-    trainset = speechset.WavDataset(DumpReader('./datasets/dumped'))
-    testset = speechset.WavDataset(DumpReader('./datasets/libri_test_clean'))
+    trainset = speechset.utils.IDWrapper(
+        speechset.WavDataset(DumpReader('./datasets/dumped')))
+    testset = speechset.utils.IDWrapper(
+        speechset.WavDataset(DumpReader('./datasets/libri_test_clean')))
 
     # model definition
     device = torch.device(
