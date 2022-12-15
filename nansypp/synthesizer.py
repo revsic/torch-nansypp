@@ -39,7 +39,9 @@ class SignalGenerator(nn.Module):
         pitch = self.upsampler(pitch[:, None]).squeeze(dim=1)
         p_amp = self.upsampler(p_amp[:, None]).squeeze(dim=1)
         # [B, T]
-        x = p_amp * torch.cumsum(2 * np.pi * pitch / self.sr, dim=-1)
+        phase = torch.cumsum(2 * np.pi * pitch / self.sr, dim=-1)
+        # [B, T]
+        x = p_amp * torch.sin(phase)
         # [B, T]
         ap_amp = self.upsampler(ap_amp[:, None]).squeeze(dim=1)
         if noise is None:
