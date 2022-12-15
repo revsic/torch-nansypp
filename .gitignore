@@ -3,3 +3,9 @@ __pycache__
 
 # test
 test.py
+
+# dataset symbolic links
+datasets
+
+# command cache
+run.sh
