@@ -11,3 +11,7 @@ datasets
 
 # command cache
 run.sh
+
+# train
+ckpt
+log
