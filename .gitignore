@@ -4,6 +4,7 @@ __pycache__
 # test
 test.py
 test.ipynb
+.ipynb_checkpoints
 
 # dataset symbolic links
 datasets
