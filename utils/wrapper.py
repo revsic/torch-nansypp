@@ -122,11 +122,10 @@ class TrainingWrapper:
         # [B, T]
         return saves[:bsize]
 
-    def loss_discriminator(self, _: torch.Tensor, seg: torch.Tensor) \
+    def loss_discriminator(self, seg: torch.Tensor) \
             -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Compute the discriminator loss.
         Args:
-            sid: [torch.long; [B]], speaker id.
             seg: [torch.float32; [B, T]], segmented speeches.
         Returns:
             loss and disctionaries.
@@ -165,11 +164,10 @@ class TrainingWrapper:
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy()}
 
-    def loss_generator(self, sid: torch.Tensor, seg: torch.Tensor) \
+    def loss_generator(self, seg: torch.Tensor) \
             -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Compute the generator loss.
         Args:
-            sid: [torch.long; [B]], speaker id.
             seg: [torch.float32; [B, T]], segmented speech.
         Returns:
             loss and disctionaries.
@@ -214,7 +212,7 @@ class TrainingWrapper:
         dist = torch.randint(
             self.config.train.cqt_shift_min,
             self.config.train.cqt_shift_max + 1,  # for inclusive range
-            (bsize,))
+            (bsize,), device=self.device)
         # real start index
         start = dist + self.model.cqt_center
         # sampled
@@ -265,10 +263,10 @@ class TrainingWrapper:
             for i in range(num_tokens)])
         # [B, N, N(sum = candidates)], negative case
         masked = confusion.masked_fill(~mask.to(torch.bool), -np.inf)
-        # [B, N]
-        score = pos - torch.logsumexp(masked, dim=-1)
+        # [B, N], negative case
+        neg = torch.logsumexp(masked, dim=-1)
         # [B]
-        cont_loss = -torch.logsumexp(score, dim=-1).mean()
+        cont_loss = -torch.logsumexp(pos - neg, dim=-1).mean()
 
         # discriminative
         logits_f, fmaps_f = self.disc.forward(synth)
@@ -294,7 +292,9 @@ class TrainingWrapper:
             'gen/fmap': fmap_loss.item(),
             'gen/rctor': rctor_loss.item(),
             'gen/pitch': pitch_loss.item(),
-            'gen/cont': cont_loss.item()}
+            'gen/cont': cont_loss.item(),
+            'gen/cont-pos': pos.mean().item() * kappa,
+            'gen/cont-neg': neg.mean().item() * kappa}
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy(),
