@@ -21,6 +21,12 @@ class TrainConfig:
         # huber norm
         # unknown
         self.delta = 1.0
+        # content loss warmup
+        self.content_start = 1e-5
+        self.content_end = 10
+        self.content_adj = 10
+        # unknown
+        self.candidates = 4
 
         # augment
         self.num_code = 32

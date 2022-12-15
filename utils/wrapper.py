@@ -35,6 +35,7 @@ class TrainingWrapper:
         self.aug.to(device)
         # alias
         self.seglen = self.config.train.seglen
+        self.content_weight = self.config.train.content_start
 
     def wrap(self, bunch: List[np.ndarray]) -> List[torch.Tensor]:
         """Wrap the array to torch tensor.
@@ -173,8 +174,8 @@ class TrainingWrapper:
         Returns:
             loss and disctionaries.
         """
-        # B
-        bsize, _ = seg.shape
+        # B, T
+        bsize, timesteps = seg.shape
         # augmnentation
         aug = self.augment(seg)
         # [B, cqt_bins, N], [B, N]
@@ -187,7 +188,6 @@ class TrainingWrapper:
         excit, synth = self.model.synthesize(
             pitch, p_amp, ap_amp, ling, timber_global, timber_bank)
         # truncating
-        _, timesteps = seg.shape
         synth = synth[:, :timesteps]
 
         # reconstruction loss
@@ -239,16 +239,34 @@ class TrainingWrapper:
         
         # alias
         kappa = self.config.train.kappa
-
-        # positive
+        n_adj, n_cand = self.config.train.content_adj, self.config.train.candidates
+        # [B, N, N]
+        confusion = torch.matmul(
+            F.normalize(ling, p=2, dim=1).transpose(1, 2),
+            F.normalize(ling2, p=2, dim=1))
+        # temperature
+        confusion = confusion / kappa
+        # N
+        num_tokens = ling.shape[-1]
+        # [N]
+        arange = torch.arange(num_tokens)
+        # [B, N], positive
+        pos = confusion[:, arange, arange]
+        # [N]
+        placeholder = torch.zeros(num_tokens, device=self.device)
+        # [N, N]
+        mask = torch.stack([
+            placeholder.scatter(
+                0,
+                (
+                    torch.randperm(num_tokens - n_adj, device=self.device)[:n_cand]
+                    + i + n_adj // 2 + 1) % num_tokens,
+                1.)
+            for i in range(num_tokens)])
+        # [B, N, N(sum = candidates)], negative case
+        masked = confusion.masked_fill(~mask.to(torch.bool), -np.inf)
         # [B, N]
-        pos = (
-            F.normalize(ling, p=2, dim=1)
-            * F.normalize(ling2, p=2, dim=1)).sum(dim=1)
-        # [B, candidates, N]
-        neg = _
-        # [B, N]
-        score = pos / kappa - torch.logsumexp(neg / kappa, dim=1)
+        score = pos - torch.logsumexp(masked, dim=-1)
         # [B]
         cont_loss = -torch.logsumexp(score, dim=-1).mean()
 
@@ -267,8 +285,8 @@ class TrainingWrapper:
                 fmap_loss = fmap_loss + (ff - fr).abs().mean()
         # reweighting
         weight = (rctor_loss / fmap_loss).detach() * fmap_loss
-        
-        loss = d_fake + weight * fmap_loss + rctor_loss + pitch_loss + cont_loss
+
+        loss = d_fake + weight * fmap_loss + rctor_loss + pitch_loss + self.content_weight * cont_loss
         losses = {
             'gen/loss': loss.item(),
             'gen/d-fake': d_fake.item(),
@@ -283,3 +301,10 @@ class TrainingWrapper:
             'mel_f': mel_f.cpu().detach().numpy(),
             'mel_r': mel_r.cpu().detach().numpy(),
             'log-cqt': cqt.log().cpu().detach().numpy()}
+
+    def update_warmup(self):
+        """Update the content loss weights.
+        """
+        self.content_weight = min(
+            self.content_weight + self.config.train.content_start,
+            self.config.train.content_end)
