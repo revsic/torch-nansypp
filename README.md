@@ -2,6 +2,11 @@
 
 Torch implementation of NANSY++: Unified Voice Synthesis with Neural Analysis and Synthesis, [[openreview](https://openreview.net/forum?id=elDEe8LYW7-)]
 
+## TODO
+
+1. breathiness perturbation
+2. DEMAND based noise addition
+
 ## Requirements
 
 Tested in python 3.7.9 conda environment.
