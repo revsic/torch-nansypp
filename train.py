@@ -96,9 +96,9 @@ class Trainer:
         for epoch in tqdm.trange(epoch, self.config.train.epoch):
             with tqdm.tqdm(total=len(self.loader), leave=False) as pbar:
                 for it, bunch in enumerate(self.loader):
-                    _, seg = self.wrapper.random_segment(bunch)
+                    sid, seg = self.wrapper.random_segment(bunch)
                     seg = torch.tensor(seg, device=self.wrapper.device)
-                    loss_g, losses_g, aux_g = self.wrapper.loss_generator(seg)
+                    loss_g, losses_g, aux_g = self.wrapper.loss_generator(sid, seg)
                     # update
                     self.optim_g.zero_grad()
                     loss_g.backward()
