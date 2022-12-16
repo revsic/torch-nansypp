@@ -239,13 +239,14 @@ class TrainingWrapper:
         pos_mask = torch.tensor(
             (sid[:, None] == sid).astype(np.float32) * (1 - np.eye(bsize)),
             device=self.device)
-        # negative case
-        metric_timber_neg = (confusion * (1 - pos_mask)).mean().item()
+        # placeholder
+        metric_timber_pos, metric_timber_neg = None, None
+        # positive case
         if pos_mask.sum() > 0:
-            # positive case
             metric_timber_pos = (confusion * pos_mask).mean().item()
-        else:
-            metric_timber_pos = None
+        # negative case
+        if (1 - pos_mask).sum() > 0:
+            metric_timber_neg = (confusion * (1 - pos_mask)).mean().item()
 
         # linguistic informations
         aug2 = self.augment(seg)
@@ -315,13 +316,14 @@ class TrainingWrapper:
             'gen/cont': cont_loss.item(),
             'metric/cont-pos': metric_pos,
             'metric/cont-neg': metric_neg,
-            'metric/timber-neg': metric_timber_neg,
             'metric/AFpitch-l1': metric_pitch_acc,
             'common/warmup': self.content_weight,
             'common/weight': weight.item()}
         # conditional ploting
         if metric_timber_pos is not None:
             losses['metric/timber-pos'] = metric_timber_pos
+        if metric_timber_neg is not None:
+            losses['metric/timber-pos'] = metric_timber_neg
 
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
