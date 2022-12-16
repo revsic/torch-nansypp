@@ -60,6 +60,7 @@ class DumpReader(speechset.datasets.DataReader):
         # transpose
         transcripts = {}
         for sid, info in meta.items():
+            sid = int(sid)
             for (i, text, _) in info['lists']:
                 transcripts[i] = (sid, text)
         
