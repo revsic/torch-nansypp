@@ -23,6 +23,7 @@ class Trainer:
     """
     LOG_IDX = 0
     LOG_MAXLEN = 1.5
+    LOG_AUDIO = 3
 
     def __init__(self,
                  model: Nansypp,
@@ -136,13 +137,19 @@ class Trainer:
                     if it % (len(self.loader) // 50) == 0:
                         self.train_log.add_image(
                             # [3, M, T]
-                            'mel-gt', self.mel_img(aux_g['mel_r'][Trainer.LOG_IDX]), step)
+                            'mel-gt/train', self.mel_img(aux_g['mel_r'][Trainer.LOG_IDX]), step)
                         self.train_log.add_image(
                             # [3, M, T]
-                            'mel-synth', self.mel_img(aux_g['mel_f'][Trainer.LOG_IDX]), step)
+                            'mel-synth/train', self.mel_img(aux_g['mel_f'][Trainer.LOG_IDX]), step)
                         self.train_log.add_image(
                             # [3, M, T]
-                            'log-cqt', self.mel_img(aux_g['log-cqt'][Trainer.LOG_IDX]), step)
+                            'log-cqt/train', self.mel_img(aux_g['log-cqt'][Trainer.LOG_IDX]), step)
+                        self.train_log.add_audio(
+                            'speech/train', seg.cpu().numpy()[Trainer.LOG_IDX, None], step,
+                            sample_rate=self.config.data.sr)
+                        self.train_log.add_audio(
+                            'synth/train', aux_g['synth'][Trainer.LOG_IDX, None], step,
+                            sample_rate=self.config.data.sr)
 
             losses = {
                 key: [] for key in {**losses_d, **losses_g}}
@@ -154,33 +161,41 @@ class Trainer:
                     _, losses_d, _ = self.wrapper.loss_discriminator(seg)
                     for key, val in {**losses_g, **losses_d}.items():
                         losses[key].append(val)
+
                 # test log
                 for key, val in losses.items():
                     self.test_log.add_scalar(key, np.mean(val), step)
 
                 # wrap last bunch
                 _, speeches, lengths = bunch
-                # min-length
-                len_ = min(
-                    lengths[Trainer.LOG_IDX].item(),
-                    int(Trainer.LOG_MAXLEN * self.config.model.sr))
-                # [T], gt plot
-                speech = speeches[Trainer.LOG_IDX, :len_]
-                self.test_log.add_image(
-                    'mel-gt', self.mel_img(self.melspec(speech).T), step)
-
+                # B
+                bsize, = lengths.shape
                 # inference
                 self.model.eval()
-                # [1, T]
-                synth, _ = self.model.forward(
-                    torch.tensor(speech[None], device=self.wrapper.device))
-                self.model.train()
+                for i in range(Trainer.LOG_AUDIO):
+                    idx = (Trainer.LOG_IDX + i) % bsize
+                    # min-length
+                    len_ = min(
+                        lengths[idx].item(),
+                        int(Trainer.LOG_MAXLEN * self.config.model.sr))
+                    # [T], gt plot
+                    speech = speeches[idx, :len_]
+                    self.test_log.add_image(
+                        f'mel-gt/test{i}', self.mel_img(self.melspec(speech).T), step)
+                    self.test_log.add_audio(
+                        f'speech/test{i}', speech[None], step, sample_rate=self.config.data.sr)
 
-                synth = synth.squeeze(dim=0).cpu().numpy()
-                self.test_log.add_image(
-                    'mel-synth', self.mel_img(self.melspec(synth).T), step)
-                self.test_log.add_audio(
-                    f'synth', synth[None], step, sample_rate=self.config.data.sr)
+                    # [1, T]
+                    synth, _ = self.model.forward(
+                        torch.tensor(speech[None], device=self.wrapper.device))
+
+                    synth = synth.squeeze(dim=0).cpu().numpy()
+                    self.test_log.add_image(
+                        f'mel-synth/test{i}', self.mel_img(self.melspec(synth).T), step)
+                    self.test_log.add_audio(
+                        f'synth/test{i}', synth[None], step, sample_rate=self.config.data.sr)
+
+                self.model.train()
 
             self.model.save(f'{self.ckpt_path}_{epoch}.ckpt', self.optim_g)
             self.disc.save(f'{self.ckpt_path}_{epoch}.ckpt-disc', self.optim_d)
