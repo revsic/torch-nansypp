@@ -259,6 +259,10 @@ class TrainingWrapper:
         # [B]
         cont_loss = -torch.logsumexp(pos - neg, dim=-1).mean()
 
+        # metric purpose
+        metric_pos = pos.mean().item() * kappa
+        metric_neg = ((confusion * mask).sum(dim=-1) / n_cand).mean().item() * kappa
+
         # discriminative
         logits_f, fmaps_f = self.disc.forward(synth)
         _, fmaps_r = self.disc.forward(seg)
@@ -279,14 +283,14 @@ class TrainingWrapper:
         losses = {
             'gen/loss': loss.item(),
             'gen/d-fake': d_fake.item(),
-            'gen/weight': weight.item(),
             'gen/fmap': fmap_loss.item(),
             'gen/rctor': rctor_loss.item(),
             'gen/pitch': pitch_loss.item(),
             'gen/cont': cont_loss.item(),
-            'gen/cont-pos': pos.mean().item() * kappa,
-            'gen/cont-neg': neg.mean().item() * kappa,
-            'gen/warmup': self.content_weight}
+            'metric/cont-pos': metric_pos,
+            'metric/cont-neg': metric_neg,
+            'common/warmup': self.content_weight,
+            'common/weight': weight.item()}
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy(),
