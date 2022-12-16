@@ -323,7 +323,7 @@ class TrainingWrapper:
         if metric_timber_pos is not None:
             losses['metric/timber-pos'] = metric_timber_pos
         if metric_timber_neg is not None:
-            losses['metric/timber-pos'] = metric_timber_neg
+            losses['metric/timber-neg'] = metric_timber_neg
 
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
