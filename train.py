@@ -162,9 +162,9 @@ class Trainer:
                 key: [] for key in {**losses_d, **losses_g}}
             with torch.no_grad():
                 for bunch in tqdm.tqdm(self.testloader, leave=False):
-                    _, seg = self.wrapper.random_segment(bunch)
+                    sid, seg = self.wrapper.random_segment(bunch)
                     seg = torch.tensor(seg, device=self.wrapper.device)
-                    _, losses_g, _ = self.wrapper.loss_generator(seg)
+                    _, losses_g, _ = self.wrapper.loss_generator(sid, seg)
                     _, losses_d, _ = self.wrapper.loss_discriminator(seg)
                     for key, val in {**losses_g, **losses_d}.items():
                         losses[key].append(val)
