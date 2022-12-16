@@ -158,8 +158,16 @@ class Trainer:
                         ax.legend()
                         self.train_log.add_figure('pitch/train', fig, step)
 
+            self.model.save(f'{self.ckpt_path}_{epoch}.ckpt', self.optim_g)
+            self.disc.save(f'{self.ckpt_path}_{epoch}.ckpt-disc', self.optim_d)
+
+            # conditional keys
+            COND_KEYS = ['metric/timber-pos', 'metric/timber-neg']
             losses = {
                 key: [] for key in {**losses_d, **losses_g}}
+            for key in COND_KEYS:
+                losses[key] = []
+
             with torch.no_grad():
                 for bunch in tqdm.tqdm(self.testloader, leave=False):
                     sid, seg = self.wrapper.random_segment(bunch)
@@ -203,9 +211,6 @@ class Trainer:
                         f'synth/test{i}', synth[None], step, sample_rate=self.config.data.sr)
 
                 self.model.train()
-
-            self.model.save(f'{self.ckpt_path}_{epoch}.ckpt', self.optim_g)
-            self.disc.save(f'{self.ckpt_path}_{epoch}.ckpt-disc', self.optim_d)
 
     def mel_img(self, mel: np.ndarray) -> np.ndarray:
         """Generate mel-spectrogram images.
