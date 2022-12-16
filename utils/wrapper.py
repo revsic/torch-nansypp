@@ -308,7 +308,9 @@ class TrainingWrapper:
             'synth': synth.cpu().detach().numpy(),
             'mel_f': mel_f.cpu().detach().numpy(),
             'mel_r': mel_r.cpu().detach().numpy(),
-            'log-cqt': cqt.log().cpu().detach().numpy()}
+            'log-cqt': cqt.clamp_min(1e-5).log().cpu().detach().numpy(),
+            'AFpitch': gt_pitch.clamp_min(1e-5).log2().cpu().detach().numpy(),
+            'pitch': pitch.clamp_min(1e-5).log2().cpu().detach().numpy()}
 
     def update_warmup(self):
         """Update the content loss weights.

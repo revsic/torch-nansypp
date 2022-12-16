@@ -150,6 +150,13 @@ class Trainer:
                         self.train_log.add_audio(
                             'synth/train', aux_g['synth'][Trainer.LOG_IDX, None], step,
                             sample_rate=self.config.data.sr)
+                        # pitch plot
+                        fig = plt.figure()
+                        ax = fig.add_subplot(1, 1, 1)
+                        ax.plot(aux_g['AFpitch'][Trainer.LOG_IDX], label='log-AFpitch')
+                        ax.plot(aux_g['pitch'][Trainer.LOG_IDX], label='log-pitch')
+                        ax.legend()
+                        self.train_log.add_figure('pitch/train', fig, step)
 
             losses = {
                 key: [] for key in {**losses_d, **losses_g}}
