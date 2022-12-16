@@ -156,10 +156,11 @@ class TrainingWrapper:
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy()}
 
-    def loss_generator(self, seg: torch.Tensor) \
+    def loss_generator(self, sid: np.ndarray, seg: torch.Tensor) \
             -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Compute the generator loss.
         Args:
+            sid: [np.long; [B]], speaker id.
             seg: [torch.float32; [B, T]], segmented speech.
         Returns:
             loss and disctionaries.
@@ -232,6 +233,20 @@ class TrainingWrapper:
             pitch.clamp_min(1e-5).log2(),
             gt_pitch.clamp_min(1e-5).log2()).item()
 
+
+        # metric purpose
+        confusion = torch.matmul(timber_global, timber_global.T)
+        pos_mask = torch.tensor(
+            (sid[:, None] == sid).astype(np.float32) * (1 - np.eye(bsize)),
+            device=self.device)
+        # negative case
+        metric_timber_neg = (confusion * (1 - pos_mask)).mean().item()
+        if pos_mask.sum() > 0:
+            # positive case
+            metric_timber_pos = (confusion * pos_mask).mean().item()
+        else:
+            metric_timber_pos = None
+
         # linguistic informations
         aug2 = self.augment(seg)
         # [B, lin_hiddens, S]
@@ -300,9 +315,14 @@ class TrainingWrapper:
             'gen/cont': cont_loss.item(),
             'metric/cont-pos': metric_pos,
             'metric/cont-neg': metric_neg,
+            'metric/timber-neg': metric_timber_neg,
             'metric/AFpitch-l1': metric_pitch_acc,
             'common/warmup': self.content_weight,
             'common/weight': weight.item()}
+        # conditional ploting
+        if metric_timber_pos is not None:
+            losses['metric/timber-pos'] = metric_timber_pos
+
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy(),
