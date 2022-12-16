@@ -230,7 +230,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--config', default=None)
-    parser.add_argument('--load-epoch', default=0, type=int)
+    parser.add_argument('--load-epoch', default=None, type=int)
     parser.add_argument('--name', default=None)
     parser.add_argument('--auto-rename', default=False, action='store_true')
     args = parser.parse_args()
@@ -288,7 +288,7 @@ if __name__ == '__main__':
     trainer = Trainer(model, disc, trainset, testset, config, device)
 
     # loading
-    if args.load_epoch > 0:
+    if args.load_epoch is not None:
         # find checkpoint
         ckpt_path = os.path.join(
             config.train.ckpt,
@@ -296,10 +296,10 @@ if __name__ == '__main__':
             f'{config.train.name}_{args.load_epoch}.ckpt')
         # load checkpoint
         ckpt = torch.load(ckpt_path)
-        model.load(ckpt, trainer.optim_g)
+        model.load_(ckpt, trainer.optim_g)
         # discriminator checkpoint
         ckpt_disc = torch.load(f'{ckpt_path}-disc')
-        disc.load(ckpt_disc, trainer.optim_d)
+        disc.load_(ckpt_disc, trainer.optim_d)
         print('[*] load checkpoint: ' + ckpt_path)
         # since epoch starts with 0
         args.load_epoch += 1
@@ -311,4 +311,4 @@ if __name__ == '__main__':
         json.dump(config.dump(), f)
 
     # start train
-    trainer.train(args.load_epoch)
+    trainer.train(args.load_epoch or 0)
