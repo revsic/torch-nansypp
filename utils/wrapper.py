@@ -3,6 +3,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torchaudio.functional as AF
 
 from config import Config
 from disc import Discriminator
@@ -220,6 +221,16 @@ class TrainingWrapper:
             biased_pitch.log2() + 0.5 * dist[:, None],
             pitch.log2(),
             delta=self.config.train.delta)
+        
+        # metric purpose
+        # [B, N']
+        gt_pitch = AF.detect_pitch_frequency(seg, sample_rate=self.config.model.sr)
+        # [B, N]
+        gt_pitch = F.interpolate(gt_pitch[:, None], size=pitch.shape[-1], mode='linear').squeeze(dim=1)
+        # []
+        metric_pitch_acc = F.l1_loss(
+            pitch.clamp_min(1e-5).log2(),
+            gt_pitch.clamp_min(1e-5).log2()).item()
 
         # linguistic informations
         aug2 = self.augment(seg)
@@ -289,6 +300,7 @@ class TrainingWrapper:
             'gen/cont': cont_loss.item(),
             'metric/cont-pos': metric_pos,
             'metric/cont-neg': metric_neg,
+            'metric/AFpitch-l1': metric_pitch_acc,
             'common/warmup': self.content_weight,
             'common/weight': weight.item()}
         return loss, losses, {
