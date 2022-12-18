@@ -26,7 +26,7 @@ class TrainConfig:
         self.content_end = 10
         self.content_adj = 10
         # unknown
-        self.candidates = 4
+        self.candidates = 15
 
         # augment
         self.num_code = 32
