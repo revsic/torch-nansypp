@@ -62,7 +62,7 @@ class DumpReader(speechset.datasets.DataReader):
         for sid, info in meta.items():
             sid = int(sid)
             for (i, text, _) in info['lists']:
-                transcripts[i] = (sid, text)
+                transcripts[str(i)] = (sid, text)
         
         return speakers, filelists, transcripts
 
