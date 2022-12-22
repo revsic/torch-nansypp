@@ -24,7 +24,7 @@ Download LibriTTS[[openslr:60](https://www.openslr.org/60/)], LibriSpeech[[opens
 Dump the dataset for training.
 
 ```
-python -m utils.dump \
+python -m speechset.utils.dump \
     --out-dir ./datasets/dumped
 ```
 

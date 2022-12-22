@@ -14,7 +14,6 @@ from config import Config
 from disc import Discriminator
 from nansypp import Nansypp
 from speechset.utils.melstft import MelSTFT
-from utils.dump import DumpReader
 from utils.wrapper import TrainingWrapper
 
 
@@ -277,9 +276,9 @@ if __name__ == '__main__':
     #         speechset.datasets.VCTK('./datasets/VCTK-Corpus', sr)]))
 
     trainset = speechset.utils.IDWrapper(
-        speechset.WavDataset(DumpReader('./datasets/dumped')))
+        speechset.WavDataset(speechset.utils.DumpReader('./datasets/dumped')))
     testset = speechset.utils.IDWrapper(
-        speechset.WavDataset(DumpReader('./datasets/libri_test_clean')))
+        speechset.WavDataset(speechset.utils.DumpReader('./datasets/libri_test_clean')))
 
     # model definition
     device = torch.device(
