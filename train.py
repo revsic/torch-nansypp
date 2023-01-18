@@ -152,7 +152,6 @@ class Trainer:
                         # pitch plot
                         fig = plt.figure()
                         ax = fig.add_subplot(1, 1, 1)
-                        ax.plot(aux_g['AFpitch'][Trainer.LOG_IDX], label='log-AFpitch')
                         ax.plot(aux_g['pitch'][Trainer.LOG_IDX], label='log-pitch')
                         ax.legend()
                         self.train_log.add_figure('pitch/train', fig, step)
@@ -160,14 +159,11 @@ class Trainer:
             self.model.save(f'{self.ckpt_path}_{epoch}.ckpt', self.optim_g)
             self.disc.save(f'{self.ckpt_path}_{epoch}.ckpt-disc', self.optim_d)
 
-            # conditional keys
-            COND_KEYS = ['metric/timber-pos', 'metric/timber-neg']
             losses = {
                 key: [] for key in {**losses_d, **losses_g}}
-            for key in COND_KEYS:
-                losses[key] = []
-
             with torch.no_grad():
+                # inference
+                self.model.eval()
                 for bunch in tqdm.tqdm(self.testloader, leave=False):
                     sid, seg = self.wrapper.random_segment(bunch)
                     seg = torch.tensor(seg, device=self.wrapper.device)
@@ -184,8 +180,6 @@ class Trainer:
                 _, speeches, lengths = bunch
                 # B
                 bsize, = lengths.shape
-                # inference
-                self.model.eval()
                 for i in range(Trainer.LOG_AUDIO):
                     idx = (Trainer.LOG_IDX + i) % bsize
                     # min-length

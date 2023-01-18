@@ -32,6 +32,7 @@ class TrainConfig:
         self.num_code = 32
         self.formant_shift = 1.4
         self.pitch_shift = 2.
+        self.pitch_range = 1.5
         self.cutoff_lowpass = 60
         self.cutoff_highpass = 10000
         self.q_min = 2
