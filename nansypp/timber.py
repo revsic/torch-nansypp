@@ -202,14 +202,14 @@ class MultiheadAttention(nn.Module):
         # [B, H, S, T]
         score = torch.matmul(keys.transpose(2, 3), queries) * (self.channels ** -0.5)
         if mask is not None:
-            score.masked_fill_(~mask[:, None, :, 0:1].to(torch.bool), -np.inf)
+            score.masked_fill_(~mask[:, None, :, :1].to(torch.bool), -np.inf)
         # [B, H, S, T]
         weights = torch.softmax(score, dim=2)
         # [B, out_channels, T]
         out = self.proj_out(
             torch.matmul(values, weights).view(bsize, -1, querylen))
         if mask is not None:
-            out = out * mask[:, 0:1]
+            out = out * mask[:, :1]
         return out
 
 
@@ -290,7 +290,7 @@ class TimberEncoder(nn.Module):
             nn.BatchNorm1d(hiddens * 2),
             nn.Linear(hiddens * 2, out_channels),
             nn.BatchNorm1d(out_channels))
-        
+
         # time-varying timber encoder
         self.timber_key = nn.Parameter(torch.randn(1, timber, tokens))
         self.sampler = MultiheadAttention(
