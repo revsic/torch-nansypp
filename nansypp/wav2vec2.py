@@ -1,9 +1,10 @@
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio
-from transformers import Wav2Vec2Model
+from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
 
 
 class Wav2Vec2Wrapper(nn.Module):
@@ -12,10 +13,7 @@ class Wav2Vec2Wrapper(nn.Module):
     DEFAULT = 'facebook/wav2vec2-large-xlsr-53'
     # Since 0-th hidden state is poosition-informed convolution features
     # , one-base indexing required
-    # Default 12 for NANSY, 15 for NANSY++
     LINGUISTIC = 15
-
-    OUT_CHANNELS = 1024
 
     def __init__(self,
                  name: Optional[str] = None,
@@ -32,11 +30,16 @@ class Wav2Vec2Wrapper(nn.Module):
         # warning can occurs since `Wav2Vec2Model` does not contain
         # quantization modules
         self.model = Wav2Vec2Model.from_pretrained(name)
-
-        self.sr = sr
-        self.resample = torchaudio.transforms.Resample(sr, 16000)
-
+        # alias
+        self.channels = self.model.config.output_hidden_size
+        self.strides = np.prod(self.model.config.conv_stride).item()
         self.linguistic = linguistic or Wav2Vec2Wrapper.LINGUISTIC
+        # feature extractor
+        ext = Wav2Vec2FeatureExtractor.from_pretrained(name)
+        # resampler
+        self.sr = sr
+        self.sr_w2v2 = ext.sampling_rate
+        self.resample = torchaudio.transforms.Resample(sr, self.sr_w2v2)
         self.eval()
 
     @torch.no_grad()
@@ -50,7 +53,8 @@ class Wav2Vec2Wrapper(nn.Module):
                 masking the inputs if provided.
         Returns:
             linguistic: [torch.float32; [B, S, C]], linguistic encodings,
-                where S = T // 320, T = floor(T' / `sr` x 16000)
+                where C = `channels`
+                      S = T // `strides`, T = ceil(T' / `sr` x `sr_w2v2`)
         """
         # [B, T]
         audio = self.resample(audio)
@@ -61,7 +65,7 @@ class Wav2Vec2Wrapper(nn.Module):
                 (bsize,), timestep, dtype=torch.long, device=audio.device)
         else:
             # rearange to 16khz audio frames
-            audiolen = torch.ceil(audiolen / self.sr * 16000).to(torch.long)
+            audiolen = torch.ceil(audiolen / self.sr * self.sr_w2v2).to(torch.long)
         # [B, T]
         mask = (
             torch.arange(timestep, device=audiolen.device)[None]
@@ -73,7 +77,7 @@ class Wav2Vec2Wrapper(nn.Module):
         # [B]
         var = ((audio - mean[:, None]) * mask).square().sum(dim=-1) / audiolen.to(torch.float32)
         # [B, T], for numerical stability of square root
-        normed = (audio - mean[:, None]) / (var[:, None] + 1e-7).sqrt()
+        normed = (audio - mean[:, None]) / (var[:, None] + 1e-7).sqrt() * mask
         output = self.model(
             normed,
             attention_mask=mask.to(torch.long),
@@ -86,14 +90,17 @@ class Wav2Vec2Wrapper(nn.Module):
         """
         if mode:
             import warnings
-            warnings.warn('WhisperWrapper does not support training mode')
+            warnings.warn('Wav2Vec2Wrapper does not support training mode')
         else:
             # super call
             super().train(False)
 
-    def load_state_dict(self,
-                        state_dict: Dict[str, torch.Tensor],
-                        strict: bool = True):
+    def state_dict(self, *args, **kwargs):
+        """Do not return the state dict.
+        """
+        return {}
+
+    def _load_from_state_dict(self, *args, **kwargs):
         """Do not load state dict.
         """
         pass

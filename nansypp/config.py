@@ -21,7 +21,6 @@ class Config:
         # Wav2Vec2Wrapper
         self.w2v2_name = 'facebook/wav2vec2-large-xlsr-53'
         self.w2v2_lin = 15
-        self.w2v2_channels = 1024
 
         # FrameLevelSynthesizer
         self.frame_kernels = 3
