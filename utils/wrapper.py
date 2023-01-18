@@ -78,14 +78,15 @@ class TrainingWrapper:
         # sample shifts
         fs = sampler(self.config.train.formant_shift)
         ps = sampler(self.config.train.pitch_shift)
+        pr = sampler(self.config.train.pitch_range)
         # parametric equalizer
         peaks = self.config.train.num_peak
         # quality factor
         power = torch.rand(bsize, peaks + 2, device=signal.device)
         # gains
         g_min, g_max = self.config.train.g_min, self.config.train.g_max
-        gain = torch.rand(bsize, peaks, device=signal.device) * (g_max - g_min) + g_min
-        return fs, ps, power, gain
+        gain = torch.rand(bsize, peaks + 2, device=signal.device) * (g_max - g_min) + g_min
+        return fs, ps, pr, power, gain
 
     @torch.no_grad()
     def augment(self, signal: torch.Tensor) -> torch.Tensor:
@@ -100,9 +101,9 @@ class TrainingWrapper:
         saves = None
         while saves is None or len(saves) < bsize:
             # [B] x 4
-            fshift, pshift, power, gain = self.sample_like(signal)
+            fshift, pshift, prange, power, gain = self.sample_like(signal)
             # [B, T]
-            out = self.aug.forward(signal, pshift, fshift, power, gain)
+            out = self.aug.forward(signal, pshift, prange, fshift, power, gain)
             # for covering unexpected NaN
             nan = out.isnan().any(dim=-1)
             if not nan.all():
@@ -222,52 +223,23 @@ class TrainingWrapper:
             biased_pitch.log2() + 0.5 * dist[:, None],
             pitch.log2(),
             delta=self.config.train.delta)
-        
-        # metric purpose
-        # [B, N']
-        gt_pitch = AF.detect_pitch_frequency(seg, sample_rate=self.config.model.sr)
-        # [B, N]
-        gt_pitch = F.interpolate(gt_pitch[:, None], size=pitch.shape[-1], mode='linear').squeeze(dim=1)
-        # []
-        metric_pitch_acc = F.l1_loss(
-            pitch.clamp_min(1e-5).log2(),
-            gt_pitch.clamp_min(1e-5).log2()).item()
-
-
-        # metric purpose
-        confusion = torch.matmul(timber_global, timber_global.T)
-        pos_mask = torch.tensor(
-            (sid[:, None] == sid).astype(np.float32) * (1 - np.eye(bsize)),
-            device=self.device)
-        # placeholder
-        metric_timber_pos, metric_timber_neg = None, None
-        # positive case
-        if pos_mask.sum() > 0:
-            metric_timber_pos = (confusion * pos_mask).mean().item()
-        # negative case
-        if (1 - pos_mask).sum() > 0:
-            metric_timber_neg = (confusion * (1 - pos_mask)).mean().item()
 
         # linguistic informations
         aug2 = self.augment(seg)
         # [B, lin_hiddens, S]
         ling2 = self.model.analyze_linguistic(aug2)
-        
+        # [2, B, lin_hiddens, S], normalize for cosine similarity.
+        ling_s = F.normalize(torch.stack([ling, ling2], dim=0), p=2, dim=2)
+
         # alias
         kappa = self.config.train.kappa
         n_adj, n_cand = self.config.train.content_adj, self.config.train.candidates
-        # [B, N, N]
-        confusion = torch.matmul(
-            F.normalize(ling, p=2, dim=1).transpose(1, 2),
-            F.normalize(ling2, p=2, dim=1))
-        # temperature
-        confusion = confusion / kappa
         # N
-        num_tokens = ling.shape[-1]
-        # [N]
-        arange = torch.arange(num_tokens)
-        # [B, N], positive
-        pos = confusion[:, arange, arange]
+        num_tokens = ling_s.shape[-1]
+        # [B, N]
+        pos = ling_s.prod(dim=0).sum(dim=1) / kappa
+        # [2, B, N, N]
+        confusion = torch.matmul(ling_s.transpose(2, 3), ling_s) / kappa
         # [N]
         placeholder = torch.zeros(num_tokens, device=self.device)
         # [N, N]
@@ -279,12 +251,12 @@ class TrainingWrapper:
                     + i + n_adj // 2 + 1) % num_tokens,
                 1.)
             for i in range(num_tokens)])
-        # [B, N, N(sum = candidates)], negative case
+        # [2, B, N, N(sum = candidates)], negative case
         masked = confusion.masked_fill(~mask.to(torch.bool), -np.inf)
-        # [B, N], negative case
+        # [2, B, N], negative case
         neg = torch.logsumexp(masked, dim=-1)
-        # [B]
-        cont_loss = -torch.logsumexp(pos - neg, dim=-1).mean()
+        # []
+        cont_loss = -torch.logsumexp(pos - neg, dim=-1).sum(dim=0).mean()
 
         # metric purpose
         metric_pos = pos.mean().item() * kappa
@@ -316,22 +288,14 @@ class TrainingWrapper:
             'gen/cont': cont_loss.item(),
             'metric/cont-pos': metric_pos,
             'metric/cont-neg': metric_neg,
-            'metric/AFpitch-l1': metric_pitch_acc,
             'common/warmup': self.content_weight,
             'common/weight': weight.item()}
-        # conditional ploting
-        if metric_timber_pos is not None:
-            losses['metric/timber-pos'] = metric_timber_pos
-        if metric_timber_neg is not None:
-            losses['metric/timber-neg'] = metric_timber_neg
-
         return loss, losses, {
             'excit': excit.cpu().detach().numpy(),
             'synth': synth.cpu().detach().numpy(),
             'mel_f': mel_f.cpu().detach().numpy(),
             'mel_r': mel_r.cpu().detach().numpy(),
             'log-cqt': cqt.clamp_min(1e-5).log().cpu().detach().numpy(),
-            'AFpitch': gt_pitch.clamp_min(1e-5).log2().cpu().detach().numpy(),
             'pitch': pitch.clamp_min(1e-5).log2().cpu().detach().numpy()}
 
     def update_warmup(self):
