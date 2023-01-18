@@ -28,46 +28,68 @@ class ParametricEqualizer(nn.Module):
         fir = torch.fft.rfft(b, self.windows, dim=-1)
         return fir / iir
 
-    def low_shelving(self, cutoff: float, q: torch.Tensor) -> torch.Tensor:
+    def low_shelving(self,
+                     cutoff: float,
+                     gain: torch.Tensor,
+                     q: torch.Tensor) -> torch.Tensor:
         """Frequency level low-shelving filter.
         Args:
             cutoff: cutoff frequency.
-            q: [torch.float32; [B]], quality factor.
+            gain: [torch.float32; [...]], boost of attenutation in decibel.
+            q: [torch.float32; [...]], quality factor.
         Returns:
-            [torch.float32; [B, windows // 2 + 1]], frequency filter.
+            [torch.float32; [..., windows // 2 + 1]], frequency filter.
         """
-        bsize, = q.shape
         # ref: torchaudio.functional.lowpass_biquad
         w0 = 2 * np.pi * cutoff / self.sr
         cos_w0 = np.cos(w0)
         # [B]
         alpha = np.sin(w0) / 2 / q
-        cos_w0 = torch.tensor(
-            [np.cos(w0)] * bsize, dtype=torch.float32, device=q.device)
-        # [B, windows // 2 + 1]
+        cos_w0 = torch.full_like(alpha, np.cos(w0))
+        A = (gain / 40. * np.log(10)).exp()
+        # [...], fir
+        b0 = A * ((A + 1) - (A - 1) * cos_w0 + 2 * A.sqrt() * alpha)
+        b1 = 2 * A * ((A - 1) - (A + 1) * cos_w0)
+        b2 = A * ((A + 1) - (A - 1) * cos_w0 - 2 * A.sqrt() * alpha)
+        # [...], iir
+        a0 = (A + 1) + (A - 1) * cos_w0 + 2 * A.sqrt() * alpha
+        a1 = -2 * ((A - 1) + (A + 1) * cos_w0)
+        a2 = (A + 1) + (A - 1) * cos_w0 - 2 * A.sqrt() * alpha
+        # [..., windows // 2 + 1]
         return self.biquad(
-            a=torch.stack([1 + alpha, -2 * cos_w0, 1 - alpha], dim=-1),
-            b=torch.stack([(1 - cos_w0) / 2, 1 - cos_w0, (1 - cos_w0) / 2], dim=-1))
+            a=torch.stack([a0, a1, a2], dim=-1),
+            b=torch.stack([b0, b1, b2], dim=-1))
 
-    def high_shelving(self, cutoff: float, q: torch.Tensor) -> torch.Tensor:
+    def high_shelving(self,
+                      cutoff: float,
+                      gain: torch.Tensor,
+                      q: torch.Tensor) -> torch.Tensor:
         """Frequency level high-shelving filter.
         Args:
             cutoff: cutoff frequency.
-            q: [torch.float32; [B]], quality factor.
+            gain: [torch.float32; [...]], boost of attenutation in decibel.
+            q: [torch.float32; [...]], quality factor.
         Returns:
-            [torch.float32; [B, windows // 2 + 1]], frequency filter.
+            [torch.float32; [..., windows // 2 + 1]], frequency filter.
         """
-        bsize, = q.shape
         # ref: torchaudio.functional.highpass_biquad
         w0 = 2 * np.pi * cutoff / self.sr
-        # [B]
+        # [...]
         alpha = np.sin(w0) / 2 / q
-        cos_w0 = torch.tensor(
-            [np.cos(w0)] * bsize, dtype=torch.float32, device=q.device)
-        # [B, windows // 2 + 1]
+        cos_w0 = torch.full_like(alpha, np.cos(w0))
+        A = (gain / 40. * np.log(10)).exp()
+        # [...], fir
+        b0 = A * ((A + 1) + (A - 1) * cos_w0 + 2 * A.sqrt() * alpha)
+        b1 = -2 * A * ((A - 1) + (A + 1) * cos_w0)
+        b2 = A * ((A + 1) + (A - 1) * cos_w0 - 2 * A.sqrt() * alpha)
+        # [...], iir
+        a0 = (A + 1) - (A - 1) * cos_w0 + 2 * A.sqrt() * alpha
+        a1 = 2 * ((A - 1) - (A + 1) * cos_w0)
+        a2 = (A + 1) - (A - 1) * cos_w0 - 2 * A.sqrt() * alpha
+        # [..., windows // 2 + 1]
         return self.biquad(
-            a=torch.stack([1 + alpha, -2 * cos_w0, 1 - alpha], dim=-1),
-            b=torch.stack([(1 + cos_w0) / 2, -1 - cos_w0, (1 + cos_w0) / 2], dim=-1))
+            a=torch.stack([a0, a1, a2], dim=-1),
+            b=torch.stack([b0, b1, b2], dim=-1))
 
     def peaking_equalizer(self,
                           center: torch.Tensor,

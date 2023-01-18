@@ -1,11 +1,11 @@
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from .lpc import LinearPredictiveCoding
 from .peq import ParametricEqualizer
+from .praat import PraatAugment
 
 from config import Config
 
@@ -20,50 +20,49 @@ class Augment(nn.Module):
         """
         super().__init__()
         self.config = config
-        self.coder = LinearPredictiveCoding(
-            config.train.num_code, config.data.win, config.data.hop)
+        self.praat = PraatAugment(config)
         self.peq = ParametricEqualizer(
-            config.data.sr, config.data.win)
+            config.model.sr, config.model.mel_windows)
         self.register_buffer(
             'window',
-            torch.hann_window(config.data.win),
+            torch.hann_window(config.model.mel_windows),
             persistent=False)
         f_min, f_max, peaks = \
             config.train.cutoff_lowpass, \
             config.train.cutoff_highpass, config.train.num_peak
+        # peaks except frequency min and max
         self.register_buffer(
             'peak_centers',
-            f_min * (f_max / f_min) ** (torch.arange(peaks) / (peaks - 1)),
+            f_min * (f_max / f_min) ** (torch.arange(peaks + 2)[1:-1] / (peaks + 1)),
             persistent=False)
 
     def forward(self,
                 wavs: torch.Tensor,
                 pitch_shift: Optional[torch.Tensor] = None,
+                pitch_range: Optional[torch.Tensor] = None,
                 formant_shift: Optional[torch.Tensor] = None,
                 quality_power: Optional[torch.Tensor] = None,
-                gain: Optional[torch.Tensor] = None,
-                mode: str = 'linear',
-                return_aux: bool = False) -> torch.Tensor:
+                gain: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Augment the audio signal, random pitch, formant shift and PEQ.
         Args:
             wavs: [torch.float32; [B, T]], audio signal.
             pitch_shift: [torch.float32; [B]], pitch shifts.
+            pitch_range: [torch.float32; [B]], pitch ranges.
             formant_shift: [torch.float32; [B]], formant shifts.
             quality_power: [torch.float32; [B, num_peak + 2]],
                 exponents of quality factor, for PEQ.
-            gain: [torch.float32; [B, num_peak]], gain in decibel.
-            mode: interpolation mode, `linear` or `nearest`.
-            return_aux: return the auxiliary values if True, only for debugging purpose.
+            gain: [torch.float32; [B, num_peak + 2]], gain in decibel.
         Returns:
             [torch.float32; [B, T]], augmented.
         """
-        auxs = {}
+        # B
+        bsize, _ = wavs.shape
         # [B, F, T / S], complex64
         fft = torch.stft(
             wavs,
-            self.config.data.fft,
-            self.config.data.hop,
-            self.config.data.win,
+            self.config.model.mel_windows,
+            self.config.model.mel_strides,
+            self.config.model.mel_windows,
             self.window,
             return_complex=True)
         # PEQ
@@ -75,92 +74,45 @@ class Augment(nn.Module):
             if gain is None:
                 # [B, num_peak]
                 gain = torch.zeros_like(q[:, :-2])
-            # B
-            bsize, _ = wavs.shape
             # [B, num_peak]
             center = self.peak_centers[None].repeat(bsize, 1)
             # [B, F]
             peaks = torch.prod(
-                self.peq.peaking_equalizer(center, gain, q[:, :-2]), dim=1)
+                self.peq.peaking_equalizer(center, gain[:, :-2], q[:, :-2]), dim=1)
             # [B, F]
             lowpass = self.peq.low_shelving(
-                self.config.train.cutoff_lowpass, q[:, -2])
+                self.config.train.cutoff_lowpass, gain[:, -2], q[:, -2])
             highpass = self.peq.high_shelving(
-                self.config.train.cutoff_highpass, q[:, -1])
+                self.config.train.cutoff_highpass, gain[:, -1], q[:, -1])
             # [B, F]
             filters = peaks * highpass * lowpass
             # [B, F, T / S]
             fft = fft * filters[..., None]
-            # debugging purpose
-            auxs.update({'peaks': peaks, 'highpass': highpass, 'lowpass': lowpass})
-        # random formant, pitch shifter
-        if formant_shift is not None or pitch_shift is not None:
-            # [B, T / S, num_code], normalize the fft values for accurate LPC analysis
-            code = self.coder.from_stft(fft / fft.abs().mean(dim=1)[:, None].clamp_min(1e-7))
-            # [B, T / S, F]
-            filter_ = self.coder.envelope(code)
-            source = fft.transpose(1, 2) / (filter_ + 1e-7)
-            # for debugging purpose
-            auxs.update({'code': code, 'filter': filter_, 'source': source})
-            # [B, T / S, F]
-            if formant_shift is not None:
-                filter_ = self.interp(filter_, formant_shift, mode=mode)
-            if pitch_shift is not None:
-                source = self.interp(source, pitch_shift, mode=mode)
-            # [B, F, T / S]
-            fft = (source * filter_).transpose(1, 2)
-            # debugging purpose
-            auxs.update({'ifilter': filter_, 'isource': source})
         # [B, T]
         out = torch.istft(
             fft,
-            self.config.data.fft,
-            self.config.data.hop,
-            self.config.data.win,
-            self.window)
+            self.config.model.mel_windows,
+            self.config.model.mel_strides,
+            self.config.model.mel_windows,
+            self.window).clamp(-1., 1.)
         # max value normalization
-        out = out / out.max(dim=-1, keepdim=True).values.clamp_min(1e-7)
-        if return_aux:
-            return out, auxs
+        out = out / out.abs().amax(dim=-1, keepdim=True).clamp_min(1e-7)
+        if formant_shift is None and pitch_shift is None and pitch_range is None:
+            return out
+        # praat-based augmentation
+        if formant_shift is None:
+            formant_shift = torch.ones(bsize)
+        if pitch_shift is None:
+            pitch_shift = torch.ones(bsize)
+        if pitch_range is None:
+            pitch_range = torch.ones(bsize)
+        out = torch.tensor(
+            np.stack([
+                self.praat.augment(o, fs.item(), ps.item(), pr.item())
+                for o, fs, ps, pr in zip(
+                    out.cpu().numpy(),
+                    formant_shift.cpu().numpy(),
+                    pitch_shift.cpu().numpy(),
+                    pitch_range.cpu().numpy())], axis=0),
+            device=out.device, dtype=torch.float32)
         return out
-
-    @staticmethod
-    def complex_interp(inputs: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        """Interpolate the complex tensor.
-        Args:
-            inputs: [torch.complex64; [B, C, ...]], complex inputs.
-        Returns:
-            [torch.complex64; [B, C, ...]], interpolated.
-        """
-        mag = F.interpolate(inputs.abs(), *args, **kwargs)
-        angle = F.interpolate(inputs.angle(), *args, **kwargs)
-        return torch.polar(mag, angle)
-
-    def interp(self,
-               inputs: torch.Tensor,
-               shifts: torch.Tensor,
-               mode: str) -> torch.Tensor:
-        """Interpolate the channel axis with dynamic shifts.
-        Args:
-            inputs: [torch.complex64; [B, T, C]], input tensor.
-            shifts: [torch.float32; [B]], shift factor.
-            mode: interpolation mode.
-        Returns:
-            [torch.complex64; [B, T, C]], interpolated.
-        """
-        INTERPOLATION = {
-            torch.float32: F.interpolate,
-            torch.complex64: Augment.complex_interp}
-        assert inputs.dtype in INTERPOLATION, 'unsupported interpolation'
-        interp_fn = INTERPOLATION[inputs.dtype]
-        # _, _, C
-        _, _, channels = inputs.shape
-        # B x [1, T, C x min(1., shifts)]
-        interp = [
-            interp_fn(
-                f[None], scale_factor=s.item(), mode=mode)[..., :channels]
-            for f, s in zip(inputs, shifts)]
-        # [B, T, C]
-        return torch.cat([
-            F.pad(f, [0, channels - f.shape[-1]])
-            for f in interp], dim=0)
