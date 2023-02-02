@@ -276,7 +276,7 @@ class TrainingWrapper:
             for ff, fr in zip(fmap_f, fmap_r):
                 fmap_loss = fmap_loss + (ff - fr).abs().mean()
         # reweighting
-        weight = (rctor_loss / fmap_loss).detach() * fmap_loss
+        weight = (rctor_loss / fmap_loss).detach()
 
         loss = d_fake + weight * fmap_loss + rctor_loss + pitch_loss + self.content_weight * cont_loss
         losses = {
